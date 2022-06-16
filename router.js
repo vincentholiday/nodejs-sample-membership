@@ -76,8 +76,20 @@ app.post('/login', function(req, res) {
 	}
 });
 
+app.post('/register', function(req, res) {
+	// TODO
+	/**
+		contains at least one lower character 
+		contains at least one upper character 
+		contains at least one digit character 
+		contains at least one special character
+		contains at least 8 characters
+	 */
+	var pattern = /(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[-+_!@#$%^&*.,?])(?=^.{8,15}$)/g;
+});
 
-// wildcard entry
+
+// wildcard entry for test
 app.get('/*', function(req, res) {
 	console.log('You reaches /*');
 	res.set('Content-Type', 'text/plain');
