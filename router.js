@@ -1,7 +1,6 @@
 /**
 06/16 先實作判斷是否已經登入、登入、註冊、發信驗證的功能與Page。
  */
-
 var express = require('express');
 var parseurl = require('parseurl');
 var session = require('express-session');
