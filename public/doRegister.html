@@ -1,0 +1,23 @@
+<html>
+<head>
+<title>
+Register Page
+</title>
+<meta charset="UTF-8">
+</head>
+<body>
+<h1>Enter your email and defined password twice</h1>
+<div>
+<form action='/register' method='POST' target='_self'>
+  <label for="email">email:</label><br>
+  <input type="text" id="email" name="email" value=""><br>
+  <label for="password">password:</label><br>
+  <input type="password" id="password1" name="password1" value=""><br>
+  <label for="password">same password for check:</label><br>
+  <input type="password" id="password2" name="password2" value=""><br><br>
+  <input type="submit" value="Submit">
+  <div id='register_error'></div>
+</form>
+</div>
+</body>
+</html>

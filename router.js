@@ -1,11 +1,14 @@
 /**
 06/16 先實作判斷是否已經登入、登入、註冊、發信驗證的功能與Page。
+07/28 註冊跟信箱驗證都完成了，記住要盡量把Page流程的控制放在router，有要等待的就用Callback來決定去哪。
  */
 var express = require('express');
 var parseurl = require('parseurl');
 var session = require('express-session');
 var cookieParserr = require('cookie-parser');
 var bodyParser = require('body-parser');
+var fs = require('fs');
+var service = require('./service');
 
 var app = express();
 
@@ -33,7 +36,7 @@ app.use(function(req, res, next) {
 		var ip = req.socket.remoteAddress;
 		req.session.userProfile = {
 			isLogin: false,
-			sessionCreatedTime: new Date().toLocaleTimeString(),
+			sessionCreatedTime: new Date(),
 			userIp: ip,
 			name: null,
 			email: null
@@ -59,15 +62,29 @@ app.get('/userProfile', function(req, res) {
 	}
 });
 
+/**
+req.session.userProfile = {
+	isLogin: false,
+	sessionCreatedTime: new Date().toLocaleTimeString(),
+	userIp: ip,
+	name: null,
+	email: null
+};
+ */
 app.post('/login', function(req, res) {
 	// fake validation
 	// TODO
 	console.log(req.body);
-	if (req.body.name == 'Jack' && req.body.password == '1234') {
+	let email = req.body.email;
+	let password = req.body.password;
+	if (email == 'Jack' && password == '1234') {
 		req.session.userProfile.isLogin = true;
+		req.session.userProfile.email = email;
+		if (!req.session.userProfile.name)
+			req.session.userProfile.name = email;
 	}
 
-	// redirest
+	// determine to redirect the corresponding page
 	if (!req.session.userProfile.isLogin) {
 		res.redirect('/doLogin.html');
 	} else {
@@ -75,8 +92,50 @@ app.post('/login', function(req, res) {
 	}
 });
 
+var doRegister_template_account_duplicate = '';
+var doRegister_template_email_not_accepted = '';
+var doRegister_template_passwords_not_matched = '';
+var doRegister_template_password_not_accepted = '';
+
+fs.readFile('./public/doRegister.html', function(err, data) {
+	if (err) {
+		console.log(err);
+		return;
+	}
+	doRegister_template = new String(data);
+	console.log('load doRegister.html for the templates.');
+
+	doRegister_template_account_duplicate = doRegister_template.replace("<div id='register_error'></div>", "<div id='register_error'>the account already exists.</div>");
+	// console.log('doRegister_template_account_duplicate: ' + doRegister_template_account_duplicate);
+
+	doRegister_template_email_not_accepted = doRegister_template.replace("<div id='register_error'></div>", "<div id='register_error'>the email are not accepted.</div>");
+	// console.log('doRegister_template_email_not_accepted: ' + doRegister_template_email_not_accepted);
+
+	doRegister_template_passwords_not_matched = doRegister_template.replace("<div id='register_error'></div>", "<div id='register_error'>the two passwords are not match.</div>");
+	// console.log('doRegister_template_passwords_not_matched: ' + doRegister_template_passwords_not_matched);
+
+	doRegister_template_password_not_accepted = doRegister_template.replace("<div id='register_error'></div>", "<div id='register_error'>the password is not accepted.</div>");
+	// console.log('doRegister_template_password_not_accepted: ' + doRegister_template_password_not_accepted);
+});
+
 app.post('/register', function(req, res) {
-	// TODO
+	console.log(req.body);
+	let email = req.body.email;
+	let password1 = req.body.password1;
+	let password2 = req.body.password2;
+
+	if (email == '' || password1 == '' || password2 == '') {
+		console.log("the email or the password is empty.")
+		res.redirect('/doRegister.html');
+		return;
+	}
+
+	if (!/^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/g.test(email)) {
+		console.log("the email is not accepted.")
+		res.end(doRegister_template_email_not_accepted);
+		return;
+	}
+
 	/**
 		contains at least one lower character 
 		contains at least one upper character 
@@ -84,24 +143,72 @@ app.post('/register', function(req, res) {
 		contains at least one special character
 		contains at least 8 characters
 	 */
-	var pattern = /(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[-+_!@#$%^&*.,?])(?=^.{8,15}$)/g;
+	var password_pattern = /(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[-+_!@#$%^&*.,?])(?=^.{8,15}$)/g;
+
+	if (password1 == password2) {
+		console.log('the two passwords are match.');
+		if (password_pattern.test(password1)) {
+			console.log('the password is accepted.');
+			// register and send an email
+			// register(email, password, session_time, callback)
+			service.register(email, password1, req.session.userProfile.sessionCreatedTime, function(result) {
+				if (result['success']) {
+					console.log('The account ' + email + ' has been added, so it\'s time to send an email for verification');
+					service.sendEmail(email);
+					res.redirect('/afterRegister.html');
+				} else {
+					console.log('The account already exists.');
+					res.end(doRegister_template_account_duplicate);
+				}
+			});
+		} else {
+			console.log('the password is not accepted.');
+			res.end(doRegister_template_password_not_accepted);
+
+		}
+	} else {
+		console.log('the two passwords are not match.');
+		res.end(doRegister_template_passwords_not_matched);
+
+	}
+
 });
 
+app.get('/resendEmail', function(req, res) {
+	service.sendEmail(req.query.email, function() {
+		res.redirect('/afterRegister.html');
+	});
+});
+
+app.get('/verification', function(req, res) {
+	let account = req.query.account;
+	let secret = req.query.secret;
+	console.log("account is %s, secret is %s.", account, secret);
+	service.verifyAccount(account, secret, function(result) {
+		console.log('account ' + account + ' is ' + (result.success ? 'verified.' : 'not verified.'));
+		if (result.success) {
+			res.redirect('/verificationSuccess.html');
+		}else{
+			res.redirect('/verificationFailure.html');
+		}
+
+	});
+
+});
 
 // wildcard entry for test
 app.get('/*', function(req, res) {
-	console.log('You reaches /*');
+	console.log('Path: /*');
 	res.set('Content-Type', 'text/plain');
 	res.write('You reach at time: ' + new Date().toLocaleTimeString() + '.\n');
 	res.write('Your cookie: ' + JSON.stringify(req.cookies) + '.\n');
 	res.end('Your session: ' + JSON.stringify(req.session) + '.\n');
 });
 
-
-
 app.listen(8081, function(err) {
 	if (err)
 		throw err;
+	service.initService();
 	console.log('__dirname: ' + __dirname);
 	console.log('listening on port 8081');
 });

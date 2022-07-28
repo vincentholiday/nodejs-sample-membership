@@ -31,6 +31,7 @@ const create_account_text = 'create table if not exists accounts(' +
 	'login_count integer not null,' +
 	'session_time timestamp,' +
 	'account_verified boolean not null default false,' +
+	'secret varchar(255) not null,' +
 	'primary key(email)' +
 	');';
 
@@ -43,6 +44,27 @@ function initTables() {
 			console.log('table has been established.');
 		}
 	});
+}
+
+const retrieve_account_secret = 'select email, secret from accounts;';
+
+function initSecretTable() {
+	pool.query(retrieve_account_secret, function(err, res) {
+		if (err) {
+			console.log(err.stack);
+		} else {
+			console.log('secret: ' + JSON.stringify(res.rows));
+			for (let i = 0; i < res.rowCount; i++) {
+				secret_table[res.rows[0].email] = res.rows[0].secret;
+			}
+			console.log('secret_table: %s', JSON.stringify(secret_table));
+		}
+	});
+}
+
+function initService() {
+	initTables();
+	initSecretTable();
 }
 
 function queryAccounts() {
@@ -94,8 +116,8 @@ function login(email, password, session_time, callback) {
 	});
 }
 
-const insert_account_text = 'insert into accounts(email, password, sign_up_time, login_count, session_time)' +
-	' values($1, $2, $3, $4, $5) returning *;';
+const insert_account_text = 'insert into accounts(email, password, sign_up_time, login_count, session_time, secret)' +
+	' values($1, $2, $3, $4, $5, $6) returning *;';
 /*
 Use the email as the user account
  */
@@ -108,8 +130,11 @@ Only accounts created via email and password must be verified with email verific
 Facebook and Google OAuth sign up accounts do not need to send email verification, and can immediately access the simple dashboard.
 */
 function register(email, password, session_time, callback) {
+	// Create Secret
+	secret_table[email] = Math.random();
+	console.log('Add secret to secret_table[' + email + ']: ' + JSON.stringify(secret_table));
 
-	const values = [email, password, new Date(), 1, session_time];
+	const values = [email, password, new Date(), 1, session_time, secret_table[email]];
 	pool.query(insert_account_text, values, function(err, res) {
 		if (err) {
 			console.log(err.stack);
@@ -120,7 +145,6 @@ function register(email, password, session_time, callback) {
 			console.log(res.rows);
 			if (callback) {
 				callback({ success: true, msg: { account: res.rows[0] } });
-				sendEmail();
 			}
 		}
 	});
@@ -128,29 +152,18 @@ function register(email, password, session_time, callback) {
 
 var secret_table = {};
 // The value of the secret mapped to the accordingly account will be removed in 30 seconds
-var timeout_value = 1000 * 30;
 
 /**
  * Send Email by the name of the account
  */
-function sendEmail(account) {
-	// Create Secret
-
-	secret_table[account] = Math.random();
-	console.log('secret_table: ' + JSON.stringify(secret_table));
-	var removeSecret = function() {
-		console.log('Remove the secret value of [' + account + '].');
-		delete secret_table[account];
-		console.log('secret_table: ' + JSON.stringify(secret_table));
-	};
-	setTimeout(removeSecret, timeout_value);
+function sendEmail(account, callback) {
 
 	// Package the email
 	var transporter = nodemailer.createTransport({
 		service: 'gmail',
 		auth: {
 			user: 'vincentfor0214@gmail.com',
-			pass: 'purosmqjaryooztv'
+			pass: ''
 		}
 	});
 	var mailOptions = {
@@ -159,7 +172,7 @@ function sendEmail(account) {
 		subject: 'Verify Your Email',
 		html: ''
 	};
-	fs.readFile('demofile1.html', function(err, data) {
+	fs.readFile('email_template.html', function(err, data) {
 		if (err) {
 			console.log(err);
 			return;
@@ -176,20 +189,61 @@ function sendEmail(account) {
 				console.log(error);
 			else
 				console.log('Email sent: %s', info.response);
+			if (callback)
+				callback();
 		});
 	});
 }
 
-function verifyAccount(account, secret) {
-	// TODO
+const verify_account_text = 'update accounts set account_verified = true where email = $1;';
+
+function verifyAccount(account, secret, callback) {
+	let result = {
+		success: null, msg: { account: account }
+	};
+
+	if (secret_table[account] == secret) {
+		console.log('the secret of this account ' + account + ' is right.');
+		// Update for the qualification
+		pool.query(verify_account_text, [account], function(err, res) {
+
+			if (res.rowCount > 0) {
+				// empty rows
+				console.log('Verify(' + account + ') Success.');
+				reuslt['success'] = true;
+			} else {
+				console.log('Account ' + account + ' does not exist.');
+				reuslt['success'] = false;
+			}
+
+			if (callback) {
+				callback(result);
+			}
+		});
+
+	} else {
+		console.log('the secret of this account ' + account + ' is not right.');
+		if (callback) {
+			callback(result);
+		}
+	}
+
 }
 
 function closeConnections() {
 	pool.end();
 }
 
-function test() {
-	// initTables();
+exports.login = login;
+exports.register = register;
+exports.sendEmail = sendEmail;
+exports.verifyAccount = verifyAccount;
+exports.closeConnections = closeConnections;
+exports.initService = initService;
+
+exports.test = function() {
+	//initTables();
+	initSecretTable();
 
 	let email = 'vincentfor1234@gmail.com';
 	let password = '1234';
@@ -205,7 +259,9 @@ function test() {
 	});
 	*/
 
-	sendEmail("shehblockflood@gmail.com");
+	// sendEmail("shehblockflood@gmail.com");
+	// TODO I should link rounters.
+	// secret_table['vincentfor1234@gmail.com'] = '1234';
+	// verifyAccount('vincentfor1234@gmail.com', '1234');
 }
 
-test();

@@ -1,18 +1,16 @@
 <html>
 <head>
 <title>
-Login Page
+Resend Email
 </title>
 <meta charset="UTF-8">
 </head>
 <body>
-<h1>Enter your email and password</h1>
+<h1>Enter your email for your verification email</h1>
 <div>
-<form action='/login' method='POST' target='_self'>
+<form action='/resendEmail' method='GET' target='_self'>
   <label for="email">email:</label><br>
   <input type="text" id="email" name="email" value=""><br>
-  <label for="password">password:</label><br>
-  <input type="password" id="password" name="password" value=""><br><br>
   <input type="submit" value="Submit">
 </form>
 </div>
