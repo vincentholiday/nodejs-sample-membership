@@ -1,0 +1,29 @@
+<html>
+<head>
+<title>
+User Profile
+</title>
+<meta charset="UTF-8">
+</head>
+<body>
+<h3>User Profile</h3>
+<div>
+name: ${name}<br/>
+email: ${email}<br/>
+<br/>
+<br/>
+</div>
+<div>
+<h3>Reset Your Password</h3>
+<form action='/resetPassword' method="post" target='_self'>
+  <label for="oldPassword">old password:</label><br/>
+  <input type="password" id="oldPassword" name="oldPassword" value=""><br/>
+  <label for="newPassword1">new password:</label><br>
+  <input type="password" id="newPassword1" name="newPassword1" value=""><br/>
+  <label for="newPassword2">same password for check:</label><br>
+  <input type="password" id="newPassword2" name="newPassword2" value=""><br/>
+  <input type="submit" value="Submit"><br/>
+  <div id='register_error'></div>
+</form>
+</body>
+</html>

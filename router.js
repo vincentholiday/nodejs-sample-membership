@@ -9,6 +9,7 @@ var cookieParserr = require('cookie-parser');
 var bodyParser = require('body-parser');
 var fs = require('fs');
 var service = require('./service');
+var util = require('util');
 
 var app = express();
 
@@ -53,12 +54,25 @@ app.use(function(req, res, next) {
 	next();
 });
 
+var userProfile_template;
+fs.readFile('./userProfile_template.html', function(err, data) {
+	if (err) {
+		console.log(err);
+		return;
+	}
+	userProfile_template = new String(data);
+	// console.log('userProfile_template: ' + userProfile_template);
+});
+
 app.get('/userProfile', function(req, res) {
 	if (!req.session.userProfile.isLogin) {
 		res.redirect('/doLogin.html');
 	} else {
-		res.set('Content-Type', 'text/plain');
-		res.end('Your user profile: ' + JSON.stringify(req.session.userProfile) + '.\n');
+		res.set('Content-Type', 'text/html; charset=utf-8');
+		let name = req.session.userProfile.name;
+		let email = req.session.userProfile.email;
+		let output = userProfile_template.replace('${name}', name).replace('${email}', email);
+		res.end(output);
 	}
 });
 
@@ -72,24 +86,45 @@ req.session.userProfile = {
 };
  */
 app.post('/login', function(req, res) {
-	// fake validation
 	// TODO
 	console.log(req.body);
 	let email = req.body.email;
 	let password = req.body.password;
+	let session_time = req.session.userProfile.sessionCreatedTime;
+
+	// fake data
+	/*
 	if (email == 'Jack' && password == '1234') {
 		req.session.userProfile.isLogin = true;
 		req.session.userProfile.email = email;
 		if (!req.session.userProfile.name)
 			req.session.userProfile.name = email;
 	}
-
 	// determine to redirect the corresponding page
 	if (!req.session.userProfile.isLogin) {
 		res.redirect('/doLogin.html');
 	} else {
 		res.redirect('/userProfile');
 	}
+	*/
+	service.login(email, password, session_time, function(result) {
+		if (result.success) {
+			req.session.userProfile.isLogin = true;
+			req.session.userProfile.email = email;
+			if (!req.session.userProfile.name)
+				req.session.userProfile.name = email;
+			res.redirect('/userProfile');
+		} else {
+			req.session.userProfile.isLogin = false;
+			if (result.msg['because'] == 'Not verified!') {
+				res.redirect('/resendEmail.html');
+			} else {
+				res.redirect('/doLogin.html');
+			}
+		}
+	});
+
+
 });
 
 var doRegister_template_account_duplicate = '';
@@ -188,7 +223,7 @@ app.get('/verification', function(req, res) {
 		console.log('account ' + account + ' is ' + (result.success ? 'verified.' : 'not verified.'));
 		if (result.success) {
 			res.redirect('/verificationSuccess.html');
-		}else{
+		} else {
 			res.redirect('/verificationFailure.html');
 		}
 

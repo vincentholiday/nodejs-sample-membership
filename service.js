@@ -1,19 +1,12 @@
 const { Pool } = require('pg');
 var nodemailer = require('nodemailer');
 var fs = require('fs');
-
-const pool = new Pool({
-	host: 'localhost',
-	port: 5432,
-	database: 'demo_db',
-	user: 'postgres',
-	password: 'qazxsw'
-});
+var pool = null;
 
 /**
 result template:
 {
-	success: true, msg: [JSON]
+	success: true, msg: {account: '', because: ''}
 }
  */
 
@@ -63,6 +56,53 @@ function initSecretTable() {
 }
 
 function initService() {
+	// init parameters
+	let PropertiesReader = require('properties-reader');
+	let properties = PropertiesReader('./config/config.properties');
+	
+	let db_host = properties.get("db_host");
+	let db_port = properties.get("db_port");
+	let db_database = properties.get("db_database");
+	let db_user = properties.get("db_user");
+	let db_password = properties.get("db_password");
+
+	let email_service = properties.get("email_service");
+	let email_sender = properties.get("email_sender");
+	let email_password = properties.get("email_password");
+
+	/*
+		console.log(properties.get("email_service"));
+		console.log(properties.get("email_sender"));
+		console.log(properties.get("email_password"));
+		console.log(properties.get("db_host"));
+		console.log(properties.get("db_port"));
+		console.log(properties.get("db_database"));
+		console.log(properties.get("db_user"));
+		console.log(properties.get("db_password"));
+	*/
+
+	pool = new Pool({
+		host: db_host,
+		port: db_port,
+		database: db_database,
+		user: db_user,
+		password: db_password
+	});
+
+	transporter = nodemailer.createTransport({
+		service: email_service,
+		auth: {
+			user: email_sender,
+			pass: email_password
+		}
+	});
+	mailOptions = {
+		from: email_sender,
+		to: null,
+		subject: null,
+		html: ''
+	};
+
 	initTables();
 	initSecretTable();
 }
@@ -86,32 +126,33 @@ const login_account_text = 'update accounts set login_count = login_count + 1, s
  */
 function login(email, password, session_time, callback) {
 	let account = null;
+	let result = {
+		success: null, msg: { account: account }
+	};
 	pool.query(check_account_text, [email, password], function(err, res) {
-		console.log(res);
 		if (res.rowCount > 0) {
 			console.log(res.rows);
 			account = res.rows[0];
-			pool.query(login_account_text, [email, password, new Date()], function(err, res) {
-				if (res.rowCount > 0) {
-					// empty rows
-					console.log('Login(' + email + ') Success.');
-					if (callback) {
-						callback({
-							success: true, msg: { account: account }
-						});
-					}
-				} else {
-					console.log('Not exist.');
-				}
-			});
+			console.log(account);
+			if (account['account_verified']) {
+				console.log('Login Success: Account %s exists and is verified.', email);
+				result.success = true;
+				// update login_count
+				pool.query(login_account_text, [email, password, session_time], function(err, res) {
+				});
 
+			} else {
+				console.log('Login Failure: Account %s exists but is not verified.', email);
+				result.success = false;
+				result['msg']['because'] = 'Not verified!';
+			}
 		} else {
 			console.log('Not exist.');
-			if (callback) {
-				callback({
-					success: false, msg: 'Not exists.'
-				});
-			}
+			result.success = false;
+			result['msg']['because'] = 'Not exist';
+		}
+		if (callback) {
+			callback(result);
 		}
 	});
 }
@@ -152,26 +193,16 @@ function register(email, password, session_time, callback) {
 
 var secret_table = {};
 // The value of the secret mapped to the accordingly account will be removed in 30 seconds
-
+var transporter = null;
+var mailOptions = null;
 /**
  * Send Email by the name of the account
  */
 function sendEmail(account, callback) {
 
 	// Package the email
-	var transporter = nodemailer.createTransport({
-		service: 'gmail',
-		auth: {
-			user: 'vincentfor0214@gmail.com',
-			pass: ''
-		}
-	});
-	var mailOptions = {
-		from: 'vincentfor0214@gmail.com',
-		to: account,
-		subject: 'Verify Your Email',
-		html: ''
-	};
+	mailOptions['to'] = account;
+	mailOptions['subject'] = 'Verify Your Email';
 	fs.readFile('email_template.html', function(err, data) {
 		if (err) {
 			console.log(err);
@@ -210,10 +241,10 @@ function verifyAccount(account, secret, callback) {
 			if (res.rowCount > 0) {
 				// empty rows
 				console.log('Verify(' + account + ') Success.');
-				reuslt['success'] = true;
+				result['success'] = true;
 			} else {
 				console.log('Account ' + account + ' does not exist.');
-				reuslt['success'] = false;
+				result['success'] = false;
 			}
 
 			if (callback) {
@@ -242,8 +273,9 @@ exports.closeConnections = closeConnections;
 exports.initService = initService;
 
 exports.test = function() {
-	//initTables();
-	initSecretTable();
+	// initTables();
+	// initSecretTable();
+	initService();
 
 	let email = 'vincentfor1234@gmail.com';
 	let password = '1234';
