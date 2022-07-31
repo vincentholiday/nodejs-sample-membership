@@ -76,6 +76,28 @@ app.get('/userProfile', function(req, res) {
 	}
 });
 
+
+var doLogin_template_empty_data = '';
+var doLogin_template_wrong_password = '';
+var doLogin_template_account_not_exists = '';
+
+fs.readFile('./public/doLogin.html', function(err, data) {
+	if (err) {
+		console.log(err);
+		return;
+	}
+	doLogin_template = new String(data);
+	console.log('load doLogin.html for the templates.');
+
+	doLogin_template_empty_data = doLogin_template.replace("<div style='color:red' id='login_error'></div>", "<div style='color:red' id='login_error'>empty email or password.</div>");
+	// console.log('doLogin_template_empty_data: ' + doLogin_template_empty_data);
+
+	doLogin_template_wrong_password = doLogin_template.replace("<div style='color:red' id='login_error'></div>", "<div style='color:red' id='login_error'>wrong password!</div>");
+	// console.log('doLogin_template_wrong_password: ' + doLogin_template_wrong_password);
+
+	doLogin_template_account_not_exists = doLogin_template.replace("<div style='color:red' id='login_error'></div>", "<div style='color:red' id='login_error'>account does not exist!</div>");
+	// console.log('doLogin_template_account_not_exists: ' + doLogin_template_account_not_exists);
+});
 /**
 req.session.userProfile = {
 	isLogin: false,
@@ -87,39 +109,29 @@ req.session.userProfile = {
  */
 app.post('/login', function(req, res) {
 	// TODO
-	console.log(req.body);
+	console.log('/login with %s', JSON.stringify(req.body));
 	let email = req.body.email;
 	let password = req.body.password;
 	let session_time = req.session.userProfile.sessionCreatedTime;
-
-	// fake data
-	/*
-	if (email == 'Jack' && password == '1234') {
-		req.session.userProfile.isLogin = true;
-		req.session.userProfile.email = email;
-		if (!req.session.userProfile.name)
-			req.session.userProfile.name = email;
+	if (email == '' || password == '') {
+		res.end(doLogin_template_empty_data);
 	}
-	// determine to redirect the corresponding page
-	if (!req.session.userProfile.isLogin) {
-		res.redirect('/doLogin.html');
-	} else {
-		res.redirect('/userProfile');
-	}
-	*/
 	service.login(email, password, session_time, function(result) {
 		if (result.success) {
 			req.session.userProfile.isLogin = true;
 			req.session.userProfile.email = email;
+			req.session.userProfile.password = result.msg.account.password;
 			if (!req.session.userProfile.name)
 				req.session.userProfile.name = email;
 			res.redirect('/userProfile');
 		} else {
 			req.session.userProfile.isLogin = false;
-			if (result.msg['because'] == 'Not verified!') {
+			if (result.msg['because'] == 'Wrong Password!') {
+				res.end(doLogin_template_wrong_password);
+			} else if (result.msg['because'] == 'Not verified!') {
 				res.redirect('/resendEmail.html');
-			} else {
-				res.redirect('/doLogin.html');
+			} else if (result.msg['because'] == 'Not exist') {
+				res.end(doLogin_template_account_not_exists);
 			}
 		}
 	});
@@ -229,6 +241,59 @@ app.get('/verification', function(req, res) {
 
 	});
 
+});
+
+
+app.post('/resetPassword', function(req, res) {
+	console.log(req.body);
+	let email = req.session.userProfile.email;
+	let oldPassword = req.body.oldPassword;
+	let newPassword1 = req.body.newPassword1;
+	let newPassword2 = req.body.newPassword2;
+
+	// validate the old password
+	if (oldPassword != req.session.userProfile.password) {
+		res.redirect('/resetPassword_Error_WrongOldPassword.html');
+		return;
+	}
+
+	// validate the new password
+	if (newPassword1 == '' || newPassword2 == '') {
+		console.log('the two new passwords should both be written.');
+		res.redirect('/resetPassword_Error_BadPasswordFormat.html');
+		return;
+	}
+	if (newPassword1 != newPassword2) {
+		console.log('the two passwords are not match.');
+		res.redirect('/resetPassword_Error_PasswordsAreUnmatched.html');
+		return;
+	}
+
+	/**
+		contains at least one lower character 
+		contains at least one upper character 
+		contains at least one digit character 
+		contains at least one special character
+		contains at least 8 characters
+	 */
+	var password_pattern = /(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[-+_!@#$%^&*.,?])(?=^.{8,15}$)/g;
+	if (!password_pattern.test(newPassword1)) {
+		console.log('this format of the new password is not accepted.');
+		res.redirect('/resetPassword_Error_BadPasswordFormat.html');
+		return;
+	}
+
+	// Update the password in db
+	service.resetPassword(email, newPassword1, function(result) {
+		if (result['success']) {
+			console.log('The the password of this account[' + email + '] has been changed.');
+			req.session.userProfile.password = newPassword1;
+			res.redirect('/userProfile');
+		} else {
+			console.log('The the password of this account[' + email + '] hasn\'t been changed.');
+			res.redirect('/resetPassword.html');
+		}
+	});
 });
 
 // wildcard entry for test

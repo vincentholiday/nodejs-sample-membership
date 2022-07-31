@@ -59,7 +59,7 @@ function initService() {
 	// init parameters
 	let PropertiesReader = require('properties-reader');
 	let properties = PropertiesReader('./config/config.properties');
-	
+
 	let db_host = properties.get("db_host");
 	let db_port = properties.get("db_port");
 	let db_database = properties.get("db_database");
@@ -117,7 +117,7 @@ function queryAccounts() {
 	});
 }
 
-const check_account_text = 'select * from accounts where email = $1 and password = $2;';
+const check_account_text = 'select * from accounts where email = $1;';
 const login_account_text = 'update accounts set login_count = login_count + 1, session_time = $3 where email = $1 and password = $2;'
 
 /**
@@ -127,27 +127,35 @@ const login_account_text = 'update accounts set login_count = login_count + 1, s
 function login(email, password, session_time, callback) {
 	let account = null;
 	let result = {
-		success: null, msg: { account: account }
+		success: null, msg: { account: null }
 	};
-	pool.query(check_account_text, [email, password], function(err, res) {
+	pool.query(check_account_text, [email], function(err, res) {
 		if (res.rowCount > 0) {
-			console.log(res.rows);
 			account = res.rows[0];
+			result.msg.account = account;
 			console.log(account);
-			if (account['account_verified']) {
-				console.log('Login Success: Account %s exists and is verified.', email);
-				result.success = true;
-				// update login_count
-				pool.query(login_account_text, [email, password, session_time], function(err, res) {
-				});
+			if (account.password == password) {
+				if (account['account_verified']) {
+					console.log('Login Success: Account %s exists with the correct password and been verified.', email);
+					result.success = true;
+					// update login_count
+					pool.query(login_account_text, [email, password, session_time], function(err, res) {
+						console.log('Account %s has been updated.', email);
+					});
 
+				} else {
+					console.log('Login Failure: Account %s exists but is not verified.', email);
+					result.success = false;
+					result['msg']['because'] = 'Not verified!';
+				}
 			} else {
-				console.log('Login Failure: Account %s exists but is not verified.', email);
+				console.log('Login Failure: Account %s exists but the password is not correct.', email);
 				result.success = false;
-				result['msg']['because'] = 'Not verified!';
+				result['msg']['because'] = 'Wrong Password!';
 			}
+
 		} else {
-			console.log('Not exist.');
+			console.log('Login Failure: Account %s does not exist.', email);
 			result.success = false;
 			result['msg']['because'] = 'Not exist';
 		}
@@ -258,8 +266,35 @@ function verifyAccount(account, secret, callback) {
 			callback(result);
 		}
 	}
-
 }
+
+
+const update_password_text = 'update accounts set password = $2 where email = $1;'
+
+/**
+	1. check whether this account exists
+	2. plus 1 to the login_count if logined
+ */
+function resetPassword(email, newPassword, callback) {
+	let result = {
+		success: null, msg: {}
+	};
+	pool.query(update_password_text, [email, newPassword], function(err, res) {
+		// console.log('res: %s', JSON.stringify(res));
+		console.log('res.rowCount: %d', res.rowCount);
+		if (res.rowCount > 0) {
+			result.success = true;
+			result['msg']['because'] = 'Password has been changed!';
+		} else {
+			result.success = false;
+			result['msg']['because'] = 'Password has not been changed!';
+		}
+		if (callback) {
+			callback(result);
+		}
+	});
+}
+
 
 function closeConnections() {
 	pool.end();
@@ -271,6 +306,7 @@ exports.sendEmail = sendEmail;
 exports.verifyAccount = verifyAccount;
 exports.closeConnections = closeConnections;
 exports.initService = initService;
+exports.resetPassword = resetPassword;
 
 exports.test = function() {
 	// initTables();
