@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+var moment = require('moment');
 var nodemailer = require('nodemailer');
 var fs = require('fs');
 var pool = null;
@@ -28,34 +29,13 @@ const create_account_text = 'create table if not exists accounts(' +
 	'primary key(email)' +
 	');';
 
-function initTables() {
-	console.log('sql: ' + create_account_text);
-	pool.query(create_account_text, function(err, res) {
-		if (err) {
-			console.log(err.stack);
-		} else {
-			console.log('table has been established.');
-		}
-	});
-}
+const create_active_statistic_text = 'create table if not exists active_statistic(' +
+	'active_number integer not null,' +
+	'session_date DATE NOT NULL,' +
+	'primary key(session_date)' +
+	');';
 
-const retrieve_account_secret = 'select email, secret from accounts;';
-
-function initSecretTable() {
-	pool.query(retrieve_account_secret, function(err, res) {
-		if (err) {
-			console.log(err.stack);
-		} else {
-			console.log('secret: ' + JSON.stringify(res.rows));
-			for (let i = 0; i < res.rowCount; i++) {
-				secret_table[res.rows[0].email] = res.rows[0].secret;
-			}
-			console.log('secret_table: %s', JSON.stringify(secret_table));
-		}
-	});
-}
-
-function initService() {
+function initParameters() {
 	// init parameters
 	let PropertiesReader = require('properties-reader');
 	let properties = PropertiesReader('./config/config.properties');
@@ -102,9 +82,50 @@ function initService() {
 		subject: null,
 		html: ''
 	};
+}
 
+function initTables() {
+	console.log('sql: ' + create_account_text);
+	pool.query(create_account_text, function(err, res) {
+		if (err) {
+			console.log(err.stack);
+		} else {
+			console.log('table accounts has been established.');
+		}
+	});
+	console.log('sql: ' + create_active_statistic_text);
+	pool.query(create_active_statistic_text, function(err, res) {
+		if (err) {
+			console.log(err.stack);
+		} else {
+			console.log('table active_statistic has been established.');
+		}
+	});
+
+}
+
+const retrieve_account_secret = 'select email, secret from accounts;';
+
+function initSecretTable() {
+	pool.query(retrieve_account_secret, function(err, res) {
+		if (err) {
+			console.log(err.stack);
+		} else {
+			console.log('secret: ' + JSON.stringify(res.rows));
+			for (let i = 0; i < res.rowCount; i++) {
+				secret_table[res.rows[0].email] = res.rows[0].secret;
+			}
+			console.log('secret_table: %s', JSON.stringify(secret_table));
+		}
+	});
+}
+
+function initService() {
+	initParameters();
 	initTables();
 	initSecretTable();
+	loadUserProfilesRepeatedly();
+	loadUsersStatisticsRepeatedly();
 }
 
 function queryAccounts() {
@@ -295,23 +316,133 @@ function resetPassword(email, newPassword, callback) {
 	});
 }
 
+const select_users_text = 'SELECT email, sign_up_time, login_count, session_time, account_verified FROM public.accounts where account_verified;';
+var userProfiles = null;
+var userProfilesIntervalFunc = null;
+var upiFuncSpan = 120;
+/*
+1. Timestamp of user sign up.
+2. Number of times logged in.
+3. Timestamp of the last user session. For users with cookies, session and login may be different, since the user may not need to log in to start a new session.
+// Update every min
+*/
+function getUserProfiles() {
+	return userProfiles;
+}
 
-function closeConnections() {
+function loadUserProfilesRepeatedly() {
+	var loadUserProfiles = function() {
+		pool.query(select_users_text, function(err, res) {
+			if (res.rowCount > 0) {
+				console.log("Load User Profiles at " + new Date());
+				// console.log(res.rows);
+				userProfiles = res.rows;
+			}
+		});
+	};
+	loadUserProfiles();
+	if (userProfilesIntervalFunc) {
+		clearInterval(userProfilesIntervalFunc);
+	}
+	userProfilesIntervalFunc = setInterval(loadUserProfiles, upiFuncSpan * 1000);
+
+}
+
+const select_verified_users_number_text = 'select count(*) from accounts where account_verified';
+const select_today_active_users_number_text = 'select count(*) from accounts where current_date = date(session_time);';
+const select_last7days_avg_active_users_number_text = 'select sum(active_number), count(session_date), cast (sum(active_number) as decimal) / count(session_date) as average_active_num from active_statistic where Date(session_date) > (Date(current_date) - 7);';
+const update_today_active_users_number_text = "INSERT INTO active_statistic(active_number, session_date) VALUES($2,$1) ON CONFLICT (session_date) do update set active_number=$2;";
+
+var usersStatisticsIntervalFunc = null;
+var signedUpNumber = null;
+var todayActiveUsersNumber = null;
+var last7daysAverageActiveUsersNumber = null;
+var usFuncSpan = 120;
+/*
+[使用者統計資料]
+在用戶數據庫儀表板的頂部，顯示以下統計信息：
+1. 已註冊用戶總數(account_verified)。
+2. 今天有活躍會話的用戶總數(session_stamp at today)。
+3. 最近 7 天滾動的平均活躍會話用戶數。
+*/
+function loadUsersStatisticsRepeatedly() {
+	var loadUsersStatistics = function() {
+		var current_time = moment().format('YYYY-MM-DDTHH:mm:ss');
+		pool.query(select_verified_users_number_text, function(err, res) {
+			if (res.rowCount > 0) {
+				console.log("Load the number of verified users at " + current_time);
+				// console.log(res.rows);
+				signedUpNumber = res.rows[0].count;
+				console.log('signedUpNumber: ' + signedUpNumber);
+			}
+		});
+		pool.query(select_today_active_users_number_text, function(err, res) {
+			if (res.rowCount > 0) {
+				console.log("Load the number of active users at " + current_time);
+				// console.log(res.rows);
+				todayActiveUsersNumber = res.rows[0].count;
+				console.log('todayActiveUsersNumber: ' + todayActiveUsersNumber);
+
+				// insert or update the number of the active users today
+				const values = [moment().format('YYYY-MM-DD'), todayActiveUsersNumber];
+				pool.query(update_today_active_users_number_text, values, function(err, res) {
+					if (res.rowCount > 0) {
+						console.log("Update today's number of the active users at " + current_time);
+					}
+				});
+			}
+		});
+		pool.query(select_last7days_avg_active_users_number_text, function(err, res) {
+			if (res.rowCount > 0) {
+				console.log("Load the number of the average of the active users in the past 7 days at " + current_time);
+				// console.log('Result of select_last7days_avg_active_users_number_text: ', JSON.stringify(res.rows));
+				last7daysAverageActiveUsersNumber = (Number.parseFloat(res.rows[0].average_active_num)).toFixed(2);
+				console.log('last7daysAverageActiveUsersNumber: ' + last7daysAverageActiveUsersNumber);
+			}
+		});
+	}
+	loadUsersStatistics();
+	if (usersStatisticsIntervalFunc) {
+		clearInterval(usersStatisticsIntervalFunc);
+	}
+	usersStatisticsIntervalFunc = setInterval(loadUsersStatistics, usFuncSpan * 1000);
+}
+
+function getUsersStatistic() {
+	return {
+		'signedUpNumber': signedUpNumber,
+		'todayActiveUsersNumber': todayActiveUsersNumber,
+		'last7daysAverageActiveUsersNumber': last7daysAverageActiveUsersNumber
+	}
+}
+
+function shutdownService() {
 	pool.end();
+	if (userProfilesIntervalFunc) {
+		clearInterval(userProfilesIntervalFunc);
+	}
+	if (usersStatisticsIntervalFunc) {
+		clearInterval(usersStatisticsIntervalFunc);
+	}
 }
 
 exports.login = login;
 exports.register = register;
 exports.sendEmail = sendEmail;
 exports.verifyAccount = verifyAccount;
-exports.closeConnections = closeConnections;
+exports.shutdownService = shutdownService;
 exports.initService = initService;
 exports.resetPassword = resetPassword;
+exports.getUserProfiles = getUserProfiles;
+exports.getUsersStatistic = getUsersStatistic;
 
 exports.test = function() {
-	// initTables();
+	initParameters();
+	initTables();
 	// initSecretTable();
-	initService();
+	// initService();
+	// loadUserProfilesRepeatedly();
+	loadUsersStatisticsRepeatedly();
 
 	let email = 'vincentfor1234@gmail.com';
 	let password = '1234';

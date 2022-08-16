@@ -9,7 +9,6 @@ var cookieParserr = require('cookie-parser');
 var bodyParser = require('body-parser');
 var fs = require('fs');
 var service = require('./service');
-var util = require('util');
 
 var app = express();
 
@@ -24,10 +23,15 @@ app.use(bodyParser.json());
 app.use(express.static(__dirname + '/public'));
 
 app.use(session({
-	secret: 'keyborad cat', //用來簽章 sessionID 的cookie, 可以是一secret字串或是多個secret組成的一個陣列。如果是陣列, 只有第一個元素會被簽到 sessionID cookie裡。而在驗證請求中的簽名時，才會考慮所有元素。
+	secret: 'keyboard cat', //用來簽章 sessionID 的cookie, 可以是一secret字串或是多個secret組成的一個陣列。如果是陣列, 只有第一個元素會被簽到 sessionID cookie裡。而在驗證請求中的簽名時，才會考慮所有元素。
 	resave: false, // 強制將session 存回 session store, 即使它沒有被修改。預設是 true
-	saveUninitialized: true,// 強制將未初始化的session存回 session store，未初始化的意思是它是新的而且未被修改。
-	cookie: { secure: false }// if true then it requires an https-enabled website.It only supports http by default.
+	// Forces a session that is "uninitialized"
+	// to be saved to the store
+	saveUninitialized: false,
+	cookie: {
+		maxAge: 10 * 60 * 1000, // 10 minutes
+		secure: false
+	}// if true then it requires an https-enabled website.It only supports http by default.
 }));
 
 // intercept every request and init the session
@@ -71,7 +75,9 @@ app.get('/userProfile', function(req, res) {
 		res.set('Content-Type', 'text/html; charset=utf-8');
 		let name = req.session.userProfile.name;
 		let email = req.session.userProfile.email;
+		let maxAge = req.session.cookie.maxAge + 'milliseconds';
 		let output = userProfile_template.replace('${name}', name).replace('${email}', email);
+		// output.replace('${maxAge}', maxAge);
 		res.end(output);
 	}
 });
@@ -123,6 +129,7 @@ app.post('/login', function(req, res) {
 			req.session.userProfile.password = result.msg.account.password;
 			if (!req.session.userProfile.name)
 				req.session.userProfile.name = email;
+			console.info('Account[%s] has login.', req.session.userProfile.name);
 			res.redirect('/userProfile');
 		} else {
 			req.session.userProfile.isLogin = false;
@@ -294,6 +301,48 @@ app.post('/resetPassword', function(req, res) {
 			res.redirect('/resetPassword.html');
 		}
 	});
+});
+
+app.get('/logout', function(req, res) {
+	let name = req.session.userProfile.name;
+	req.session.destroy();
+	console.info('Account[%s] has signed out.', name);
+	res.redirect('/doLogin.html');
+});
+
+/**
+[使用者資料庫看板]
+Create a dashboard with a list of all users that have signed up to your app. For each user, show the following information:
+1. Timestamp of user sign up.
+2. Number of times logged in.
+3. Timestamp of the last user session. For users with cookies, session and login may be different, since the user may not need to log in to start a new session.
+ */
+app.get('/userProfiles.html', function(req, res) {
+	var userProfiles = service.getUserProfiles();
+	res.set('Content-Type', 'text/html; charset=utf-8');
+	let signedUpNumber = service.getUsersStatistic().signedUpNumber;
+	let todayActiveUsersNumber = service.getUsersStatistic().todayActiveUsersNumber;
+	let last7daysAverageActiveUsersNumber = service.getUsersStatistic().last7daysAverageActiveUsersNumber;
+
+	let upperText = `<html><head><style>table, th, td { border: 1px solid black; border-collapse: collapse;}</style><title>User Profiles</title><meta charset="UTF-8"></head><body><h1>User Profiles</h1>`;
+
+	upperText += '<ol><li>The total number of people who signed up: ' + signedUpNumber + '</li>';
+	upperText += "<li>Today's number of active users: " + todayActiveUsersNumber + '</li>';
+	upperText += '<li>The average number of active users in the past 7 days: ' + last7daysAverageActiveUsersNumber + '</li></ol>';
+
+	upperText += '<table><tr> <th>Email</th> <th>Sign Up Time</th> <th>Login Count</th> <th>Session Time</th> </tr>';
+	res.write(upperText);
+
+	for (let i = 0; i < userProfiles.length; i++) {
+		let email = userProfiles[i].email;
+		let sign_up_time = userProfiles[i].sign_up_time.toLocaleString();
+		let login_count = userProfiles[i].login_count;
+		let session_time = userProfiles[i].session_time.toLocaleString();
+		let tr = `<tr><td>${email}</td><td>${sign_up_time}</td><td>${login_count}</td><td>${session_time}</td></tr>`;
+		res.write(tr);
+	}
+	let lowerText = `</body></html>`;
+	res.end(lowerText);
 });
 
 // wildcard entry for test
